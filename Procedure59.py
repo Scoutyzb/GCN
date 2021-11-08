@@ -7,10 +7,10 @@ Created on Fri Oct  4 21:36:11 2019
 
 import torch
 from engine import Engine
-from ShopModels import Pair_Shop_MLP,CNN_Shop_MLP,GCN2Layers, GCN_Shop_MLP
+from ShopModels import Pair_Shop_MLP,GCN2Layers, GCN_Shop_MLP,GCN1Layers
 from CombineMLP import Combine_MLP,CombineGNN_MLP
 #from ScoreMLP import Score_MLP
-from scoreMLP import Pair_score_MLP, CNN_score_MLP, GNN_score_MLP
+from scoreMLP import Pair_score_MLP, RNN_score_MLP, GNN_score_MLP
 import sys
 import numpy as np
 import time
@@ -40,53 +40,26 @@ class Procedure(torch.nn.Module):
         self.Pair_score_mlp=Pair_score_MLP(config)
         
         
-        #CNN
-        self.CNN_embedding_types=torch.nn.Embedding(config['n_types']+1,
-                                                config['type_hidden_size'],
-                                                padding_idx=config['n_types'])
-        self.embedding_CNN_distances=torch.nn.Embedding(config['n_distances']+1,
-                                                    config['distance_hidden_size'],
-                                                    padding_idx=config['n_distances'])
-        self.embedding_CNN_prices=torch.nn.Embedding(config['n_prices']+1,
-                                                 config['price_hidden_size'],
-                                                 padding_idx=config['n_prices'])
-        self.CNN_shop_mlp=CNN_Shop_MLP(config)
-        self.CNN_score_mlp=CNN_score_MLP(config)
+
+
+
         
-        self.typeConv=torch.nn.Sequential(
-                torch.nn.Conv2d(1,1,3,1,1),
-                torch.nn.ReLU(),
-                torch.nn.Conv2d(1,1,3,1,1),
-                torch.nn.ReLU()
+        self.GCN1_Shop_MLP = GCN1_Shop_MLP(config)
+        self.GCN1Layers = GCN1Layers(config)
+        self.LSTM = torch.nn.LSTM(input_size=16,
+                hidden_size=16,
+                num_layers=3,
                 )
-        
-        
-        
-        #RNN 类型的嵌入层  #当输入为type+1的时候，代表0 0 
-        self.GNN_embedding_types=torch.nn.Embedding(config['n_types']+1,
-                                                config['type_hidden_size'],
-                                                padding_idx=config['n_types'])
-        
-        self.embedding_GNN_prices=torch.nn.Embedding(config['n_prices']+1,
-                                                 config['price_hidden_size'],
-                                                 padding_idx=config['n_prices'])
-        
-        self.embedding_GNN_distances=torch.nn.Embedding(config['n_distances']+1,
-                                                    config['distance_hidden_size'],
-                                                    padding_idx=config['n_distances'])
-        # self.RNN_Shop_mlp=RNN_Shop_MLP(config)
-        # self.RNN_score_mlp=RNN_score_MLP(config)
-        
-        # self.distanceLSTM=torch.nn.LSTM(
-        #         input_size=16,
-        #         hidden_size=16,
-        #         num_layers=3,
-        #         batch_first=True
-        #         )
-        self.GNN_Shop_Mlp = GCN_Shop_MLP(config)
+        self.RNN_score_MLP = RNN_score_MLP(config)
+
+
+        self.GCN2_Shop_MLP = GCN_Shop_MLP(config)
         self.GCN2Layers= GCN2Layers(config) 
         self.GNN_score_MLP = GNN_score_MLP(config)
-        self.combine_mlp=CombineGNN_MLP(config)
+        
+
+
+        self.combine_mlp=Combine_MLP(config)
         
         
         #cuda部分
@@ -97,32 +70,26 @@ class Procedure(torch.nn.Module):
             self.Pair_shop_mlp=self.Pair_shop_mlp.cuda()
             self.Pair_score_mlp=self.Pair_score_mlp.cuda()
                    
-            self.CNN_embedding_types=self.CNN_embedding_types.cuda()
-            self.embedding_CNN_distances=self.embedding_CNN_distances.cuda()
-            self.embedding_CNN_prices=self.embedding_CNN_prices.cuda()
-            self.CNN_shop_mlp=self.CNN_shop_mlp.cuda()
-            self.CNN_score_mlp=self.CNN_score_mlp.cuda()
-            self.typeConv=self.typeConv.cuda()
-            
-            # self.RNN_embedding_types=self.RNN_embedding_types.cuda()
-            self.GNN_embedding_types = self.GNN_embedding_types.cuda()
-            # self.embedding_RNN_prices=self.embedding_RNN_prices.cuda()
-            self.embedding_GNN_prices=self.embedding_GNN_prices.cuda()
 
-            self.embedding_GNN_distances=self.embedding_GNN_distances.cuda()
+            self.GCN1_Shop_MLP = self.GCN1_Shop_MLP.cuda()
+            self.GCN1Layers = self.GCN1Layers.cuda()
+            self.LSTM = self.LSTM.cuda()
+            self.RNN_score_MLP = self.self.RNN_score_MLP.cuda()
             # self.RNN_shop_mlp=self.RNN_Shop_mlp.cuda()
             # self.RNN_score_mlp=self.RNN_score_mlp.cuda()
             # self.distanceLSTM=self.distanceLSTM.cuda()
+            self.GCN2_Shop_MLP = self.GCN2_Shop_MLP.cuda()
+
             self.GCN2Layers = self.GCN2Layers.cuda()
             self.GNN_score_MLP = self.GNN_score_MLP.cuda()
             self.combine_mlp=self.combine_mlp.cuda()
-            self.GNN_Shop_Mlp = self.GNN_Shop_Mlp.cuda()
+        
         
         
         
     def forward(self,types,groups,ratings,prices,lengthes,neighbortypes,
                 neighbordistances,neighborratings,neighborcomments,
-                neighborprices,neighborgroups,tpg,edge_index,batch_id): 
+                neighborprices,neighborgroups,tpgs,edge_indexs,batch_id): 
         #Pair based aggregation
         pairtime1 = time.time()
 
@@ -154,48 +121,19 @@ class Procedure(torch.nn.Module):
         pairduration = time.time()-pairtime1
         print("Pair Duration Time is %f"%(pairduration))
 
-        # #CNN partition
-        # cnntime1 = time.time()
 
-        # CNN_type_embedding=self.CNN_embedding_types(types)
-        # CNN_neighbortypes_embedding=self.CNN_embedding_types(neighbortypes)   #(batch_size, n_shops, shop_hidden_size)
-        
-        # CNN_neighbordistances_embedding=self.embedding_CNN_distances(neighbordistances)
-        # CNN_neighborprices_embedding=self.embedding_CNN_prices(neighborprices)
-        
-        # CNN_shops_hidden=self.CNN_shop_mlp(CNN_neighbortypes_embedding,CNN_neighbordistances_embedding,neighborratings,
-        #                           neighborcomments,CNN_neighborprices_embedding,neighborgroups) #(10,15,16)
-        
-        # type_based_matrix=self.g_type_based_matrix(CNN_shops_hidden,neighbortypes) #(10,126,16)
-        # if torch.cuda.is_available():
-        #     type_based_matrix=type_based_matrix.cuda()
-        # type_matrix=type_based_matrix.view(type_based_matrix.shape[0],1,type_based_matrix.shape[1],
-        #                                    type_based_matrix.shape[2])
-        # type_context_1=self.typeConv(type_matrix).squeeze()
-        # type_context_2=torch.empty(type_context_1.shape[0],type_context_1.shape[-1])
-        # if torch.cuda.is_available(): #(10,126,16)
-        #     type_context_2=type_context_2.cuda() #(10,16)
-        # for i,t in enumerate(types):
-        #     type_context_2[i]=type_context_1[i][t.item()]  
-        # #type_context=type_context.view(type_context.size(0),-1) #15位 #(10,15)
-        # #type_context_3=self.GNN_CNN_MLP(type_context_2)
-        # CNN_result=self.CNN_score_mlp(type_context_2,CNN_type_embedding)
-        
-        # cnnduration = time.time()-cnntime1
-        # print("CNN Time Duartion is %f"%(cnnduration))
 
         gnntime1 = time.time()
         #RNN partition #batch.size * 1
-        (all_types,all_prices,all_groups)=tpg
-        x = self.GNN_Shop_Mlp(all_types.cuda(),all_prices.cuda(),all_groups.cuda())
+        (all_types,all_prices,all_groups)=tpgs[-1]
+        x = self.GNN2_Shop_MLP(all_types.cuda(),all_prices.cuda(),all_groups.cuda())
         x = x.cuda()
-        edge_index = edge_index.cuda()
+        edge_index = edge_indexs[-1].cuda()
+        GNN_hidden = self.GCN2Layers(x,edge_index)
         
+    
         
-        
-        batch_size = len(Pair_type_embedding)
-        
-        
+        batch_size = len(Pair_type_embedding)  
         j = batch_size*batch_id
         if batch_id == 10000:
             j=2491
@@ -203,37 +141,39 @@ class Procedure(torch.nn.Module):
         if batch_id == 100000:
             j=3321
             jstart=3321
-
         for i,_ in enumerate(ratings):
             j+=1
-        
-        #
-        # if 0 == ((torch.zeros(data.x.shape[0],data.x.shape[1]) != data.x).sum()):
-        #     pass
-        # else:
-        #     pass
-        # if torch.cuda.is_available():
-        #     data=data.cuda()  
-        # print(data)
-        GNN_hidden = self.GCN2Layers(x,edge_index)
         if batch_id==10000 or batch_id==100000:
             GNN_result = self.GNN_score_MLP(GNN_hidden[jstart:j,:])
         else:
             GNN_result = self.GNN_score_MLP(GNN_hidden[batch_id*batch_size:(batch_id+1)*batch_size,:])
-        # if torch.cuda.is_available():
-            # GNN_hidden=GNN_hidden.cuda()  
-        # distance_based_matrix=self.g_distance_based_matrix(rnn_neighbors_hidden,neighbordistances) #(10,6,16)
-        #distance_context1=distance_based_matrix.reshape(distance_based_matrix.shape[0],-1)
-        #RNN input (batch_size,neibors_len,embeddingsize)
-        # distance_based_context,(h_n,h_c)=self.distanceLSTM(distance_based_matrix)
-        # distance_context2=distance_based_context[:,-1,:] #(10,16)
-        # RNN_result=self.RNN_score_mlp(distance_context2,RNN_type_embedding)
-        
-        
         gnnduration = time.time()-gnntime1
         print("GNN Time Duartion is %f"%(gnnduration))
 
-        final_scores=self.combine_mlp(Pair_result,GNN_result)
+
+        rnntime1 = time.time()
+
+        RNN_hiddens = []
+        for tpg,edge_index in zip(tpgs,edge_indexs):
+            (all_types,all_prices,all_groups)=tpg
+            x = self.GCN1_Shop_MLP(all_types.cuda(),all_prices.cuda(),all_groups.cuda())
+            h = self.GCN1Layers(x,edge_index)
+            h = h.view(1,h.shape[0],h.shape[1])
+            RNN_hiddens.append(h)
+        
+        RNN_hidden = torch.cat(RNN_hiddens).cuda()
+
+        output, (hn, cn) = self.LSTM(RNN_hidden)
+        
+        RNN_result = self.RNN_score_MLP(hn)
+
+        rnnduration = time.time()-rnntime1
+        print("RNN Time Duartion is %f"%(rnnduration))
+
+
+
+
+        final_scores=self.combine_mlp(Pair_result,RNN_result,GNN_result)
         
 
 
@@ -299,10 +239,10 @@ class ProcedureEngine(Engine):
         self.model=Procedure(config)
         super(ProcedureEngine,self).__init__(config)
         
-        # PATH = 'checkpoints/GNNNoCNN_Epoch6_valmse3.5584_testmse3.5024_ndcg0.9117.model'
+        PATH = 'checkpoints/GNNNoCNN_Epoch58_valmse2.2443_testmse2.4803_ndcg0.9307.model'
 
-        # self.model.load_state_dict(torch.load(PATH))
-        # self.model.eval()
+        self.model.load_state_dict(torch.load(PATH))
+        self.model.eval()
         #use pretrained
         # model_dict=self.model.state_dict()
         # print(torch.cuda.is_available())

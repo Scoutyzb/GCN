@@ -129,8 +129,8 @@ for epoch in range(config['num_epoch']):
     print('_'*80)
 
     print('Epoch {} starts !'.format(epoch))
-    engine.train_an_epoch(sample_generator,epoch,tpg,edge_index)
-    val_mse,test_mse,ndcg=engine.evaluate(sample_generator,epoch,tpg,edge_index)
+    engine.train_an_epoch(sample_generator,epoch,tpgs,edge_indexs)
+    val_mse,test_mse,ndcg=engine.evaluate(sample_generator,epoch,tpgs,edge_indexs)
     engine.save(config['alias'],epoch,val_mse,test_mse,ndcg)
 
 print("_"*80)

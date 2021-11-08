@@ -26,7 +26,7 @@ class Engine(object):
         
     def train_single_batch(self,types,groups,targets,ratings,prices,lengthes,neighbortypes,
                 neighbordistances,neighborratings,neighborcomments,
-                neighborprices,neighborgroups,tpg,edge_index,batch_id):
+                neighborprices,neighborgroups,tpgs,edge_indexs,batch_id):
         
         if torch.cuda.is_available():
             types=types.cuda()
@@ -49,7 +49,7 @@ class Engine(object):
         #         ,'邻居得分','邻居评论数','邻居价格','邻居组数'],opset_version=11)
         scores=self.model(types,groups,ratings,prices,lengthes,neighbortypes,
                 neighbordistances,neighborratings,neighborcomments,
-                neighborprices,neighborgroups,tpg,edge_index,batch_id) #(batch_size)
+                neighborprices,neighborgroups,tpgs,edge_indexs,batch_id) #(batch_size)
         loss=self.crit(scores,targets)
         timebackend = time.time()
 
@@ -62,7 +62,7 @@ class Engine(object):
         return loss
 
     
-    def train_an_epoch(self,sample_generator,epoch_id,tpg,edge_index):
+    def train_an_epoch(self,sample_generator,epoch_id,tpgs,edge_indexs):
         self.model.train()
         total_loss=0
         
@@ -77,14 +77,14 @@ class Engine(object):
                 neighborprices,neighborgroups)=sample_generator.get_train_batch(batch)
             loss=self.train_single_batch(types,groups,targets,ratings,prices,lengthes,neighbortypes,
                 neighbordistances,neighborratings,neighborcomments,
-                neighborprices,neighborgroups,tpg,edge_index,batch_id)
+                neighborprices,neighborgroups,tpgs,edge_indexs,batch_id)
 
             print('[Training Epoch{}] Batch {}, loss {}'.format(epoch_id,
                   batch_id,loss.item()))
             total_loss+=loss.item()
         # loss.backward()
             
-    def evaluate(self,sample_generator,epoch_id,tpg,edge_index):
+    def evaluate(self,sample_generator,epoch_id,tpgs,edge_indexs):
         loss_fn=torch.nn.MSELoss()
         
         
@@ -110,7 +110,7 @@ class Engine(object):
         batch_id = 10000
         val_scores=self.model(types,groups,ratings,prices,lengthes,neighbortypes,
                 neighbordistances,neighborratings,neighborcomments,
-                neighborprices,neighborgroups,tpg,edge_index,batch_id)
+                neighborprices,neighborgroups,tpgs,edge_indexs,batch_id)
         
         val_mse=loss_fn(val_scores,targets)
         ########################################################################
@@ -136,7 +136,7 @@ class Engine(object):
         print(batch_id)
         test_scores=self.model(types,groups,ratings,prices,lengthes,neighbortypes,
                 neighbordistances,neighborratings,neighborcomments,
-                neighborprices,neighborgroups,tpg,edge_index,batch_id)
+                neighborprices,neighborgroups,tpgs,edge_indexs,batch_id)
         
         test_mse=loss_fn(test_scores,targets)
         

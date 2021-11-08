@@ -72,6 +72,25 @@ class RNN_Shop_MLP(torch.nn.Module):
     
 
 
+class GCN1Layers(torch.nn.Module):
+    def __init__(self,config):
+        super(GCN2Layers,self).__init__()
+        input_size = config['GCNLayers'][0]
+        # hidden_size = config['GCNLayers'][1]
+        output_size = config['GCNLayers'][2]
+        self.conv1 = GCNConv(input_size, output_size)
+        # self.conv2 = GCNConv(hidden_size, output_size)
+        
+    def forward(self,x,edge_index):
+        x = self.conv1(x, edge_index)
+        # x = F.relu(x)
+        # x = F.dropout(x, training=self.training)
+        # x = self.conv2(x, edge_index)
+
+        return x
+
+
+
 class GCN_Shop_MLP(torch.nn.Module):
     def __init__(self,config):
         super(GCN_Shop_MLP,self).__init__()
