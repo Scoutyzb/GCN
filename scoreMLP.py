@@ -42,15 +42,21 @@ class RNN_score_MLP(torch.nn.Module):
         super(RNN_score_MLP,self).__init__()
         self.fc_layers=torch.nn.ModuleList()
         for idx, (in_size,out_size) in enumerate(zip(config['score_mlp_layers'][:-1],config['score_mlp_layers'][1:])):
+            if in_size == 32: #TODO
+                in_size = 16
             self.fc_layers.append(torch.nn.Linear(in_size,out_size))
-            
-    def forward(self,context,embeddings):     
-        vector=torch.cat([context,embeddings],dim=-1)
+    # def forward(self,context,embeddings):     
+    #     vector=torch.cat([context,embeddings],dim=-1)
+    #     for idx in range(len(self.fc_layers)):
+    #         vector=self.fc_layers[idx](vector)
+    #         vector=torch.nn.ReLU()(vector)  
+    #     return vector  
+    def forward(self,context):     
+        vector=context
         for idx in range(len(self.fc_layers)):
             vector=self.fc_layers[idx](vector)
             vector=torch.nn.ReLU()(vector)  
         return vector  
-
 
 
 class GNN_score_MLP(torch.nn.Module):

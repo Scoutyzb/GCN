@@ -9,11 +9,8 @@ import torch
 from engine import Engine
 from ShopModels import Pair_Shop_MLP,GCN2Layers, GCN_Shop_MLP,GCN1Layers
 from CombineMLP import Combine_MLP,CombineGNN_MLP
-#from ScoreMLP import Score_MLP
 from scoreMLP import Pair_score_MLP, RNN_score_MLP, GNN_score_MLP
-import sys
 import numpy as np
-import time
 
 
 class Procedure(torch.nn.Module):
@@ -44,7 +41,7 @@ class Procedure(torch.nn.Module):
 
 
         
-        self.GCN1_Shop_MLP = GCN1_Shop_MLP(config)
+        self.GCN_Shop_MLP = GCN_Shop_MLP(config)
         self.GCN1Layers = GCN1Layers(config)
         self.LSTM = torch.nn.LSTM(input_size=16,
                 hidden_size=16,
@@ -56,8 +53,15 @@ class Procedure(torch.nn.Module):
         self.GCN2_Shop_MLP = GCN_Shop_MLP(config)
         self.GCN2Layers= GCN2Layers(config) 
         self.GNN_score_MLP = GNN_score_MLP(config)
-        
 
+
+        self.GCN_Shop_MLP_no_sameType = GCN_Shop_MLP(config)
+        self.GCN1Layers_no_sameType = GCN1Layers(config)
+        self.LSTM_no_same_Type = torch.nn.LSTM(input_size=16,
+                hidden_size=16,
+                num_layers=3,
+                )
+        self.GRN_no_same_Type = RNN_score_MLP(config)
 
         self.combine_mlp=Combine_MLP(config)
         
@@ -71,10 +75,10 @@ class Procedure(torch.nn.Module):
             self.Pair_score_mlp=self.Pair_score_mlp.cuda()
                    
 
-            self.GCN1_Shop_MLP = self.GCN1_Shop_MLP.cuda()
+            self.GCN_Shop_MLP = self.GCN_Shop_MLP.cuda()
             self.GCN1Layers = self.GCN1Layers.cuda()
             self.LSTM = self.LSTM.cuda()
-            self.RNN_score_MLP = self.self.RNN_score_MLP.cuda()
+            self.RNN_score_MLP = self.RNN_score_MLP.cuda()
             # self.RNN_shop_mlp=self.RNN_Shop_mlp.cuda()
             # self.RNN_score_mlp=self.RNN_score_mlp.cuda()
             # self.distanceLSTM=self.distanceLSTM.cuda()
@@ -84,15 +88,17 @@ class Procedure(torch.nn.Module):
             self.GNN_score_MLP = self.GNN_score_MLP.cuda()
             self.combine_mlp=self.combine_mlp.cuda()
         
-        
-        
+            self.GCN_Shop_MLP_no_sameType = self.GCN_Shop_MLP_no_sameType.cuda()
+            self.GCN1Layers_no_sameType = self.GCN1Layers_no_sameType.cuda()
+            self.LSTM_no_same_Type =  self.LSTM_no_same_Type.cuda()
+            self.GRN_no_same_Type = self.GRN_no_same_Type.cuda()
         
     def forward(self,types,groups,ratings,prices,lengthes,neighbortypes,
                 neighbordistances,neighborratings,neighborcomments,
-                neighborprices,neighborgroups,tpgs,edge_indexs,batch_id): 
+                neighborprices,neighborgroups,graph_features,edge_indexs,edge_index_no_same,indexs): 
+       
+       
         #Pair based aggregation
-        pairtime1 = time.time()
-
         Pair_type_embedding=self.Pair_embedding_types(types)
         Pair_neighbortypes_embedding=self.Pair_embedding_types(neighbortypes)   #(batch_size, n_shops, shop_hidden_size)
         
@@ -112,137 +118,117 @@ class Procedure(torch.nn.Module):
                     t = t.cuda()
                 aggregator.append(t)
             else:
-                aggregator.append(torch.mean(pair_shops_hidden[i:i+1,:j,:],1,False)) #有邻居,就是取平均向量，所有邻居的平均？！
+                aggregator.append(torch.mean(pair_shops_hidden[i:i+1,:j,:],1,False)) #有邻居,就是取平均向量，所有邻居的平均！
         
         pair_context=torch.cat(aggregator)   #(batch_size,hidden_size) (10,16)
-        
         Pair_result=self.Pair_score_mlp(pair_context,Pair_type_embedding)
 
-        pairduration = time.time()-pairtime1
-        print("Pair Duration Time is %f"%(pairduration))
 
-
-
-        gnntime1 = time.time()
-        #RNN partition #batch.size * 1
-        (all_types,all_prices,all_groups)=tpgs[-1]
-        x = self.GNN2_Shop_MLP(all_types.cuda(),all_prices.cuda(),all_groups.cuda())
-        x = x.cuda()
-        edge_index = edge_indexs[-1].cuda()
-        GNN_hidden = self.GCN2Layers(x,edge_index)
         
-    
+
         
-        batch_size = len(Pair_type_embedding)  
-        j = batch_size*batch_id
-        if batch_id == 10000:
-            j=2491
-            jstart=2491
-        if batch_id == 100000:
-            j=3321
-            jstart=3321
-        for i,_ in enumerate(ratings):
-            j+=1
-        if batch_id==10000 or batch_id==100000:
-            GNN_result = self.GNN_score_MLP(GNN_hidden[jstart:j,:])
-        else:
-            GNN_result = self.GNN_score_MLP(GNN_hidden[batch_id*batch_size:(batch_id+1)*batch_size,:])
-        gnnduration = time.time()-gnntime1
-        print("GNN Time Duartion is %f"%(gnnduration))
+        # batch_size = len(Pair_type_embedding)  
+        # j = batch_size*batch_id
+        # if batch_id == 10000:
+        #     j=2491
+        #     jstart=2491
+        # if batch_id == 100000:
+        #     j=3321
+        #     jstart=3321
+        # for i,_ in enumerate(ratings):
+        #     j+=1
 
-
-        rnntime1 = time.time()
+        #竞争模块
 
         RNN_hiddens = []
-        for tpg,edge_index in zip(tpgs,edge_indexs):
-            (all_types,all_prices,all_groups)=tpg
-            x = self.GCN1_Shop_MLP(all_types.cuda(),all_prices.cuda(),all_groups.cuda())
-            h = self.GCN1Layers(x,edge_index)
+        for graph_feature,edge_index in zip(graph_features,edge_indexs):
+            (all_types,all_prices,all_groups)= graph_feature
+            x = self.GCN_Shop_MLP(all_types.cuda(),all_prices.cuda(),all_groups.cuda())
+            h = self.GCN1Layers(x,edge_index.cuda())
             h = h.view(1,h.shape[0],h.shape[1])
             RNN_hiddens.append(h)
         
         RNN_hidden = torch.cat(RNN_hiddens).cuda()
-
         output, (hn, cn) = self.LSTM(RNN_hidden)
+
         
-        RNN_result = self.RNN_score_MLP(hn)
+        hn_s = []
+        for index in indexs:
+          hn_index = hn[-1][index].view(1,-1)
+          hn_s.append(hn_index)
+        hn_cat = torch.cat(hn_s,0)
+       
+        RNN_result = self.RNN_score_MLP(hn_cat) 
 
-        rnnduration = time.time()-rnntime1
-        print("RNN Time Duartion is %f"%(rnnduration))
+
+        #集聚模块
+
+        RNN_hidden_no_same = []
+        for graph_feature,edge_index_no_same in zip(graph_features,edge_index_no_same):
+            (all_types,all_prices,all_groups)=graph_feature
+            x = self.GCN_Shop_MLP_no_sameType(all_types.cuda(),all_prices.cuda(),all_groups.cuda())
+            h = self.GCN1Layers_no_sameType(x,edge_index.cuda())
+            h = h.view(1,h.shape[0],h.shape[1])
+            RNN_hidden_no_same.append(h)
+        
+        RNN_hidden_no_same = torch.cat(RNN_hidden_no_same).cuda()
+        output, (hn, cn) = self.LSTM(RNN_hidden_no_same)
+
+
+        hn_s = []
+        for index in indexs:
+          hn_index = hn[-1][index].view(1,-1)
+          hn_s.append(hn_index)
+        hn_cat = torch.cat(hn_s,0)
+
+        RNN_result_nosame = self.GRN_no_same_Type(hn_cat)
 
 
 
 
-        final_scores=self.combine_mlp(Pair_result,RNN_result,GNN_result)
+
+
+        #消融
+        # final_scores=self.combine_mlp(RNN_result,GNN_result)
+        # final_scores=self.combine_mlp(Pair_result,RNN_result,GNN_result)
+        # final_scores=self.combine_mlp(Pair_result,GNN_result)
+        # final_scores = self.combine_mlp(Pair_result,RNN_result)
+        final_scores = self.combine_mlp(Pair_result,RNN_result,RNN_result_nosame)
+
+
+
         
 
-
+        #预测
         scores=final_scores.squeeze(1)
-        # print(type(scores))
         return scores
 
-    def g_type_based_matrix(self,shops_hidden,neighbortypes):
-        '''
-            shops_hidden: tensor (batch_size,n_neighbors,hidden_size)
-            neighbortypes: tensor (batch_size,n_neighbors)
-        '''
-        neighbors_types=neighbortypes.cpu()
-        batch_size,n_types=shops_hidden.shape[0],self.config['n_types']
-        matrix=torch.tensor(np.zeros((batch_size,n_types,16))).float()
 
-        
-        for i in range(batch_size):
-            for j in range(n_types):
-                index=np.where(neighbors_types[i]==j)
-                vector1=shops_hidden[i][index]
-                if len(vector1)!=0:
-                    matrix[i][j]=torch.sum(vector1).float()
-                    
-        return matrix # tensor (batch_size,n_types,32)    
-
-    def g_distance_based_matrix(self,rnn_neighbors_hidden,neighbordistances):
-        # TODO
-        n_distances= 6
-        neighbordistances=neighbordistances.cpu().data.numpy()
-        batch_size=neighbordistances.shape[0]
-
-        #batsize 时间步数 , hidden_size
-        matrix=torch.tensor(np.zeros((batch_size,n_distances,16))).float()
-
-
-        vector=rnn_neighbors_hidden
-        try: 
-            #第一个训练数据的第一个lenght？
-            lastVector=vector[0][0]
-        except:
-            lastVector=torch.zeros(16)
-        for i in range(batch_size):
-            # n_distances 距离的种类数？
-            # n_distances = len(neighbordistances[i])
-            for k,j in zip(range(n_distances),reversed(range(n_distances))):
-                #j由大到小 也就是由远及近 j代表的是真实距离 k代表的是index
-                index=np.where(neighbordistances[i]==j)
-                
-                vector1=vector[i][index]
-                #似乎有问题
-                if len(vector1)!=0:
-                    lastVector=torch.mean(vector1).float()# cvj/alpha
-                    matrix[i][k]=lastVector
-                else:
-                    matrix[i][k]=lastVector
-        if torch.cuda.is_available():            
-            return matrix.cuda() # tensor (batch_size,time_step,Rnninput_size)  
-        else:
-            return matrix
 class ProcedureEngine(Engine):
     def __init__(self,config):
-        self.model=Procedure(config)
+        #Main Model
+        self.model=Procedure(config) 
         super(ProcedureEngine,self).__init__(config)
+        if config['pretrained']==True:
+          PATH = config['pretrained_path']
+          self.model.load_state_dict(torch.load(PATH))
         
-        PATH = 'checkpoints/GNNNoCNN_Epoch58_valmse2.2443_testmse2.4803_ndcg0.9307.model'
-
-        self.model.load_state_dict(torch.load(PATH))
-        self.model.eval()
+        
+        
+        
+        
+        
+        
+        
+        
+        
+        
+        
+        
+        
+        
+        
+        # self.model.eval()
         #use pretrained
         # model_dict=self.model.state_dict()
         # print(torch.cuda.is_available())

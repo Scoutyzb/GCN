@@ -18,12 +18,14 @@ class Combine_MLP(torch.nn.Module):
         if torch.cuda.is_available():
             self.weight = self.weight.cuda()
 
-    def forward(self,Pair_result,CNN_result,RNN_result): 
+    # def forward(self,Pair_result,CNN_result,RNN_result): 
+    def forward(self,CNN_result,RNN_result,Pair_result): 
+
 # =============================================================================
 #         vector=torch.stack((general_context,distance_context,type_context),dim=-1)
 #         vector=vector.matmul(self.weight).squeeze(-1)
 # =============================================================================
-        vector=torch.cat([Pair_result,CNN_result,RNN_result],dim=-1)
+        vector=torch.cat([CNN_result,RNN_result,Pair_result],dim=-1)
         for idx in range(len(self.fc_layers)):
             vector=self.fc_layers[idx](vector)
             vector=torch.nn.ReLU()(vector)
